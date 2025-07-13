@@ -87,7 +87,13 @@ fun DetectionScreen(navController: NavHostController) {
                         navController.navigate("ai_result/$encodedResult")
                     }
                 )
-                1 -> BluetoothDetectionTab(bluetoothScanner)
+                1 -> BluetoothDetectionTab(
+                    scanner = bluetoothScanner,
+                    onAIResultReady = { result ->
+                        val encodedResult = URLEncoder.encode(result, StandardCharsets.UTF_8.toString())
+                        navController.navigate("ai_result/$encodedResult")
+                    }
+                )
                 2 -> MagneticDetectionTab(magneticFieldDetector)
                 3 -> InfraredDetectionTab(infraredDetector)
             }

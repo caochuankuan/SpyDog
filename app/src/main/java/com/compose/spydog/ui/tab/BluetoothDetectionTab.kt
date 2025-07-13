@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,16 +47,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.compose.spydog.detector.BluetoothScanner
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
+// 添加AI分析需要的导入
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalPermissionsApi::class)
 
 @Composable
-fun BluetoothDetectionTab(scanner: BluetoothScanner) {
-    AllBluetoothTab(scanner)
+fun BluetoothDetectionTab(scanner: BluetoothScanner, onAIResultReady: (String) -> Unit = {}) {
+    AllBluetoothTab(scanner, onAIResultReady)
 }
 
 @Composable
-fun AllBluetoothTab(scanner: BluetoothScanner) {
+fun AllBluetoothTab(scanner: BluetoothScanner, onAIResultReady: (String) -> Unit = {}) {
     val allDevices by scanner.allBluetoothDevices
     val suspiciousDevices by scanner.suspiciousDevices
     val isScanning by scanner.isScanning
@@ -62,6 +75,64 @@ fun AllBluetoothTab(scanner: BluetoothScanner) {
     val context = LocalContext.current
 
     var showSuspiciousDevices by remember { mutableStateOf(false) }
+    
+    // AI查询相关状态
+    var isAIAnalyzing by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    
+    // DeepSeek API调用
+    suspend fun queryDeepSeekAPI(query: String): String {
+        return withContext(Dispatchers.IO) {
+            try {
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(30, TimeUnit.SECONDS)
+                    .readTimeout(30, TimeUnit.SECONDS)
+                    .build()
+                
+                val json = JSONObject().apply {
+                    put("model", "deepseek-chat")
+                    put("messages", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("role", "system")
+                            put("content", "你是一个网络安全专家，专门分析蓝牙设备是否可能是隐藏摄像头或监控设备。请根据设备名称、MAC地址、设备类型等信息进行分析。回答不要md格式，普通文本格式。")
+                        })
+                        put(JSONObject().apply {
+                            put("role", "user")
+                            put("content", query)
+                        })
+                    })
+                    put("stream", false)
+                }
+                
+                val requestBody = json.toString().toRequestBody("application/json".toMediaType())
+                
+                val request = Request.Builder()
+                    .url("https://api.deepseek.com/chat/completions")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Authorization", "Bearer sk-fd3795e918014b3dab12406a6cdce972")
+                    .post(requestBody)
+                    .build()
+                
+                val response = client.newCall(request).execute()
+                val responseBody = response.body?.string()
+                
+                if (response.isSuccessful && responseBody != null) {
+                    val jsonResponse = JSONObject(responseBody)
+                    val choices = jsonResponse.getJSONArray("choices")
+                    if (choices.length() > 0) {
+                        val message = choices.getJSONObject(0).getJSONObject("message")
+                        message.getString("content")
+                    } else {
+                        "API返回了空结果"
+                    }
+                } else {
+                    "API请求失败: ${response.code} - ${responseBody ?: "未知错误"}"
+                }
+            } catch (e: Exception) {
+                "请求出错: ${e.message}"
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -95,6 +166,7 @@ fun AllBluetoothTab(scanner: BluetoothScanner) {
                         contentDescription = null,
                         modifier = Modifier.padding(end = 8.dp)
                     )
+
                     Text(
                         text = message,
                         style = MaterialTheme.typography.bodyMedium
@@ -201,6 +273,62 @@ fun AllBluetoothTab(scanner: BluetoothScanner) {
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(if (showSuspiciousDevices) "返回全部" else "粗略分析")
+            }
+        }
+
+        // AI分析按钮
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = {
+                // 构建蓝牙设备信息查询字符串
+                val bluetoothInfoQuery = if (showSuspiciousDevices && suspiciousDevices.isNotEmpty()) {
+                    val deviceInfo = suspiciousDevices.joinToString("; ") { device ->
+                        "设备名:${device.name}, MAC:${device.address}, 信号:${device.signalStrength}dBm, 类型:${device.deviceType}, 原因:${device.reason}"
+                    }
+                    "请分析这些可疑蓝牙设备是否可能是隐藏摄像头或监控设备(先给结论，再分析): $deviceInfo"
+                } else if (allDevices.isNotEmpty()) {
+                    val deviceInfo = allDevices.joinToString("; ") { device ->
+                        "${device.name}(${device.address}, ${device.signalStrength}dBm, ${device.deviceType})"
+                    }
+                    "请分析这些蓝牙设备是否可能是隐藏摄像头或监控设备(先给结论，再分析): $deviceInfo"
+                } else {
+                    "如何识别隐藏摄像头的蓝牙设备特征"
+                }
+                
+                // 调用DeepSeek API
+                isAIAnalyzing = true
+                coroutineScope.launch {
+                    try {
+                        val result = queryDeepSeekAPI(bluetoothInfoQuery)
+                        onAIResultReady(result)
+                    } catch (e: Exception) {
+                        onAIResultReady("分析失败: ${e.message}")
+                    } finally {
+                        isAIAnalyzing = false
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isAIAnalyzing && (allDevices.isNotEmpty() || suspiciousDevices.isNotEmpty()),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.tertiary
+            )
+        ) {
+            if (isAIAnalyzing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    color = MaterialTheme.colorScheme.onTertiary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("AI分析中...")
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "AI查询",
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("AI分析隐藏摄像头")
             }
         }
 
