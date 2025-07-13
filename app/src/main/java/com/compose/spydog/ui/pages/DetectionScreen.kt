@@ -57,7 +57,7 @@ fun DetectionScreen(navController: NavHostController) {
                 .padding(paddingValues)
         ) {
             // 标签页
-            val mainTabs = listOf("WiFi检测", "蓝牙检测", "磁场检测", "红外检测")
+            val mainTabs = listOf("WiFi检测", "蓝牙检测", "磁场检测", "相机检测")
 
             TabRow(
                 selectedTabIndex = selectedTabIndex,

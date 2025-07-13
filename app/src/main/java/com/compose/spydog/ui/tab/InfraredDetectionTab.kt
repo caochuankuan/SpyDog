@@ -1,9 +1,14 @@
 package com.compose.spydog.ui.tab
 
+import android.content.Context
+import android.hardware.camera2.CameraManager
 import android.util.Log
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.TorchState
+import androidx.camera.core.Camera
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Column
@@ -19,17 +24,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +60,9 @@ import com.google.accompanist.permissions.rememberPermissionState
 @Composable
 fun InfraredDetectionTab(detector: InfraredDetector) {
     var isCameraOpen by remember { mutableStateOf(false) }
+    var isFlashlightOn by remember { mutableStateOf(false) }
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    var detectionMode by remember { mutableStateOf<String?>(null) } // "infrared" 或 "reflection"
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -58,6 +70,57 @@ fun InfraredDetectionTab(detector: InfraredDetector) {
     val cameraPermissionState = rememberPermissionState(
         android.Manifest.permission.CAMERA
     )
+
+    // 关闭手电筒
+    fun turnOffFlashlight() {
+        try {
+            camera?.cameraControl?.enableTorch(false)
+            isFlashlightOn = false
+        } catch (e: Exception) {
+            Log.e("Flashlight", "Error turning off flashlight: ${e.message}", e)
+        }
+    }
+
+    // 释放相机资源
+    fun releaseCamera() {
+        try {
+            val cameraProvider = ProcessCameraProvider.getInstance(context).get()
+            cameraProvider.unbindAll()
+            turnOffFlashlight()
+            camera = null
+            Log.d("Camera", "Camera resources released")
+        } catch (e: Exception) {
+            Log.e("Camera", "Error releasing camera: ${e.message}", e)
+        }
+    }
+
+    // 使用CameraX控制手电筒
+    fun toggleFlashlight() {
+        try {
+            camera?.let { cam ->
+                val newState = !isFlashlightOn
+                cam.cameraControl.enableTorch(newState)
+                isFlashlightOn = newState
+                Toast.makeText(
+                    context,
+                    if (newState) "手电筒已打开" else "手电筒已关闭",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } ?: run {
+                Toast.makeText(context, "请先打开相机", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Log.e("Flashlight", "Error toggling flashlight: ${e.message}", e)
+            Toast.makeText(context, "手电筒控制失败: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // 当组件销毁时关闭手电筒和释放相机
+    DisposableEffect(Unit) {
+        onDispose {
+            releaseCamera()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -99,7 +162,7 @@ fun InfraredDetectionTab(detector: InfraredDetector) {
                         try {
                             val cameraProvider = ProcessCameraProvider.getInstance(context).get()
                             cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(
+                            camera = cameraProvider.bindToLifecycle(
                                 lifecycleOwner,
                                 cameraSelector,
                                 preview
@@ -135,7 +198,7 @@ fun InfraredDetectionTab(detector: InfraredDetector) {
                         color = MaterialTheme.colorScheme.error
                     )
                     Text(
-                        text = "请授予相机权限以使用红外检测功能",
+                        text = "请授予相机权限以使用检测功能",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )
@@ -169,11 +232,11 @@ fun InfraredDetectionTab(detector: InfraredDetector) {
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "红外检测待机中",
+                            text = "隐藏摄像头检测",
                             style = MaterialTheme.typography.headlineSmall
                         )
                         Text(
-                            text = "点击开始按钮打开相机",
+                            text = "选择检测模式开始扫描",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -185,75 +248,216 @@ fun InfraredDetectionTab(detector: InfraredDetector) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Control button
-        Button(
-            onClick = {
-                if (cameraPermissionState.status.isGranted) {
-                    isCameraOpen = !isCameraOpen
-                } else {
-                    cameraPermissionState.launchPermissionRequest()
-                }
-            },
+        // Control buttons row
+        Row(
             modifier = Modifier.fillMaxWidth()
         ) {
-            Icon(
-                imageVector = if (isCameraOpen) Icons.Default.Stop else Icons.Default.PlayArrow,
-                contentDescription = null
-            )
+            // 红外检测按钮
+            Button(
+                onClick = {
+                    if (cameraPermissionState.status.isGranted) {
+                        if (detectionMode == "infrared" && isCameraOpen) {
+                            // 停止红外检测
+                            isCameraOpen = false
+                            detectionMode = null
+                            releaseCamera()
+                        } else {
+                            // 开始红外检测
+                            detectionMode = "infrared"
+                            isCameraOpen = true
+                        }
+                    } else {
+                        cameraPermissionState.launchPermissionRequest()
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (detectionMode == "infrared" && isCameraOpen) 
+                        MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(
+                    imageVector = if (detectionMode == "infrared" && isCameraOpen) Icons.Default.Stop else Icons.Default.PlayArrow,
+                    contentDescription = null
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    if (cameraPermissionState.status.isGranted) {
+                        if (detectionMode == "infrared" && isCameraOpen) "停止检测" else "红外检测"
+                    } else {
+                        "红外检测"
+                    }
+                )
+            }
+
             Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                if (cameraPermissionState.status.isGranted) {
-                    if (isCameraOpen) "关闭相机" else "打开相机"
-                } else {
-                    "请求相机权限"
-                }
-            )
+
+            // 反光检测按钮
+            Button(
+                onClick = {
+                    if (cameraPermissionState.status.isGranted) {
+                        if (detectionMode == "reflection" && isCameraOpen) {
+                            // 停止反光检测
+                            isCameraOpen = false
+                            detectionMode = null
+                            releaseCamera()
+                        } else {
+                            // 开始反光检测
+                            detectionMode = "reflection"
+                            if (!isCameraOpen) {
+                                isCameraOpen = true
+                                // 等待相机初始化后再开启手电筒
+                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                    toggleFlashlight()
+                                }, 1000)
+                            } else {
+                                toggleFlashlight()
+                            }
+                        }
+                    } else {
+                        cameraPermissionState.launchPermissionRequest()
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (detectionMode == "reflection" && isCameraOpen) 
+                        MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                ),
+                enabled = cameraPermissionState.status.isGranted
+            ) {
+                Icon(
+                    imageVector = if (detectionMode == "reflection" && isCameraOpen) Icons.Default.Stop else Icons.Default.FlashOn,
+                    contentDescription = null
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    if (detectionMode == "reflection" && isCameraOpen) "停止检测" else "反光检测"
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Usage instructions - compact layout
-        Card {
-            Column(
-                modifier = Modifier
-                    .padding(12.dp)
-                    .heightIn(max = 200.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                Text(
-                    text = "红外检测说明",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(6.dp))
+        // Usage instructions - 根据检测模式显示对应说明
+        if (detectionMode != null) {
+            Card {
+                Column(
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .heightIn(max = 200.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    when (detectionMode) {
+                        "infrared" -> {
+                            Text(
+                                text = "红外检测模式",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
 
-                Text(
-                    text = "检测原理: 利用摄像头检测红外光反射，隐藏摄像头镜头会反射红外光",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "检测原理: 利用摄像头感应器检测红外光谱，隐藏摄像头的红外补光灯会被识别",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
 
-                Text(
-                    text = "使用方法: 1.关闭房间灯光 2.打开相机 3.缓慢扫描可疑区域 4.寻找异常亮点",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "使用方法: 1.关闭房间所有灯光 2.缓慢移动手机扫描 3.观察屏幕上的异常亮点",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
 
-                Text(
-                    text = "检测重点: 烟雾报警器、空调出风口、电视机顶盒、装饰品、插座面板",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "检测重点: 烟雾报警器、路由器、机顶盒、充电器、装饰品等电子设备",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
 
-                Text(
-                    text = "注意事项: 必须在黑暗环境中使用，移动速度要缓慢，注意红色光点",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.Red
-                )
+                            Text(
+                                text = "注意事项: 在完全黑暗环境下效果最佳，移动要缓慢，注意红色光点",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.Red
+                            )
+                        }
+
+                        "reflection" -> {
+                            Text(
+                                text = "反光检测模式",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Text(
+                                text = "检测原理: 使用手电筒照射，摄像头镜头会产生强烈反光，形成明显光斑",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = "使用方法: 1.关闭房间灯光 2.手电筒自动开启 3.缓慢扫描可疑区域 4.寻找强烈反光点",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = "检测重点: 空调出风口、插座面板、相框、镜子、装饰品、电器缝隙",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = "注意事项: 寻找异常强烈的反光点，正常物体反光较弱且分散",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.Red
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // 默认说明
+            Card {
+                Column(
+                    modifier = Modifier
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = "隐藏摄像头检测说明",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "🔍 红外检测: 检测隐藏摄像头的红外补光灯，适用于夜视摄像头",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    Text(
+                        text = "💡 反光检测: 利用手电筒照射检测镜头反光，适用于所有类型摄像头",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "请选择检测模式开始扫描",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
