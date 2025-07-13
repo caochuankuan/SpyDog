@@ -30,8 +30,6 @@ fun DetectionScreen(navController: NavHostController) {
     val bluetoothScanner = remember { BluetoothScanner(context) }
     
     var selectedTabIndex by remember { mutableIntStateOf(0) }
-    var showNetworkDevicesScreen by remember { mutableStateOf(false) }
-    var selectedWiFiSSID by remember { mutableStateOf("") }
     
     DisposableEffect(Unit) {
         onDispose {
@@ -52,57 +50,46 @@ fun DetectionScreen(navController: NavHostController) {
             )
         }
     ) { paddingValues ->
-        if (showNetworkDevicesScreen) {
-            // 显示网络设备扫描页面
-            NetworkDevicesScreen(
-                wifiSSID = selectedWiFiSSID,
-                onBackClick = {
-                    showNetworkDevicesScreen = false
-                }
-            )
-        } else {
-            // 显示主检测页面
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
+        // 显示主检测页面
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            // 标签页
+            val mainTabs = listOf("WiFi检测", "蓝牙检测", "磁场检测", "红外检测")
+
+            TabRow(
+                selectedTabIndex = selectedTabIndex,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                // 标签页
-                val mainTabs = listOf("WiFi检测", "蓝牙检测", "磁场检测", "红外检测")
-
-                TabRow(
-                    selectedTabIndex = selectedTabIndex,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    mainTabs.forEachIndexed { index, title ->
-                        Tab(
-                            selected = selectedTabIndex == index,
-                            onClick = { selectedTabIndex = index },
-                            text = { Text(title) }
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // 标签页内容
-                when (selectedTabIndex) {
-                    0 -> WiFiTab(
-                        scanner = wifiScanner,
-                        onConnectedWiFiClick = { ssid ->
-                            selectedWiFiSSID = ssid
-                            showNetworkDevicesScreen = true
-                        },
-                        onAIResultReady = { result ->
-                            // 导航到AI结果页面
-                            val encodedResult = URLEncoder.encode(result, StandardCharsets.UTF_8.toString())
-                            navController.navigate("ai_result/$encodedResult")
-                        }
+                mainTabs.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTabIndex == index,
+                        onClick = { selectedTabIndex = index },
+                        text = { Text(title) }
                     )
-                    1 -> BluetoothDetectionTab(bluetoothScanner)
-                    2 -> MagneticDetectionTab(magneticFieldDetector)
-                    3 -> InfraredDetectionTab(infraredDetector)
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 标签页内容
+            when (selectedTabIndex) {
+                0 -> WiFiTab(
+                    scanner = wifiScanner,
+                    onConnectedWiFiClick = { ssid ->
+                        val encodedSSID = URLEncoder.encode(ssid, StandardCharsets.UTF_8.toString())
+                        navController.navigate("network_devices/$encodedSSID")
+                    },
+                    onAIResultReady = { result ->
+                        val encodedResult = URLEncoder.encode(result, StandardCharsets.UTF_8.toString())
+                        navController.navigate("ai_result/$encodedResult")
+                    }
+                )
+                1 -> BluetoothDetectionTab(bluetoothScanner)
+                2 -> MagneticDetectionTab(magneticFieldDetector)
+                3 -> InfraredDetectionTab(infraredDetector)
             }
         }
     }

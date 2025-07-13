@@ -19,6 +19,7 @@ import androidx.navigation.compose.rememberNavController
 import com.compose.spydog.ui.theme.SpyDogTheme
 import com.compose.spydog.ui.pages.DetectionScreen
 import com.compose.spydog.ui.pages.AIResultScreen
+import com.compose.spydog.ui.pages.NetworkDevicesScreen
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 
@@ -70,6 +71,15 @@ fun SpyDogNavigation() {
     ) {
         composable("detection") {
             DetectionScreen(navController = navController)
+        }
+        composable("network_devices/{wifiSSID}") { backStackEntry ->
+            val wifiSSID = backStackEntry.arguments?.getString("wifiSSID") ?: ""
+            NetworkDevicesScreen(
+                wifiSSID = wifiSSID,
+                onBackClick = {
+                    navController.popBackStack()
+                }
+            )
         }
         composable("ai_result/{result}") { backStackEntry ->
             val result = backStackEntry.arguments?.getString("result") ?: ""
