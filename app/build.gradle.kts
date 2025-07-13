@@ -59,6 +59,11 @@ dependencies {
     
     // 图像处理
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.json:json:20231013")
+    
+    // 导航组件
+    implementation("androidx.navigation:navigation-compose:2.9.1")
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

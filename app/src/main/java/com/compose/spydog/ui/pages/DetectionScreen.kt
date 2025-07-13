@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavHostController
 import com.compose.spydog.detector.BluetoothScanner
 import com.compose.spydog.detector.InfraredDetector
 import com.compose.spydog.detector.MagneticFieldDetector
@@ -15,11 +16,13 @@ import com.compose.spydog.ui.tab.BluetoothDetectionTab
 import com.compose.spydog.ui.tab.InfraredDetectionTab
 import com.compose.spydog.ui.tab.MagneticDetectionTab
 import com.compose.spydog.ui.tab.WiFiTab
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetectionScreen() {
+fun DetectionScreen(navController: NavHostController) {
     val context = LocalContext.current
     val infraredDetector = remember { InfraredDetector() }
     val magneticFieldDetector = remember { MagneticFieldDetector(context) }
@@ -89,6 +92,11 @@ fun DetectionScreen() {
                         onConnectedWiFiClick = { ssid ->
                             selectedWiFiSSID = ssid
                             showNetworkDevicesScreen = true
+                        },
+                        onAIResultReady = { result ->
+                            // 导航到AI结果页面
+                            val encodedResult = URLEncoder.encode(result, StandardCharsets.UTF_8.toString())
+                            navController.navigate("ai_result/$encodedResult")
                         }
                     )
                     1 -> BluetoothDetectionTab(bluetoothScanner)
@@ -98,7 +106,6 @@ fun DetectionScreen() {
             }
         }
     }
-
 }
 
 @Composable
